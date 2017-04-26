@@ -1,0 +1,6 @@
+_build
+*.native
+local
+*~
+*.install
+*.pyc

@@ -1,0 +1,51 @@
+version: '3.1'
+
+services:
+  ci:
+    image: 'linuxkitci/ci'
+    # The canary flag can be used to limit which branches you want to test:
+    command: '-v --web-ui http://localhost:8080/ --metadata-store tcp:db:5640 --canary=linuxkit/linuxkit/heads/master'
+    ports:
+      - '8080:8080'
+    volumes:
+      # The LinuxKit build uses Docker to build things:
+      - '/var/run/docker.sock:/var/run/docker.sock'
+      # A Git clone of the linuxkit repository. Will be cloned automatically if missing:
+      - '/repos'
+      # The admin password:
+      - './local/secrets:/secrets'
+      # A local cache of the generated LinuxKit outputs.
+      - '/build-cache'
+      # Records which VMs we created, so we can clean up later.
+      - './local/ci-state:/ci-state'
+      # Pull from here instead of from GitHub
+      - './local/linuxkit:/fake-remote/linuxkit'
+      # SSH directory for accessing GCP instances
+      - './local/builder-ssh:/root/.ssh/builder-ssh'
+    environment:
+      - CLOUDSDK_CORE_PROJECT=moby-datakit-ci
+      - CLOUDSDK_COMPUTE_ZONE=europe-west1-b
+      - CLOUDSDK_COMPUTE_KEYS=/run/secrets/gcp-key.json
+      - CLOUDSDK_IMAGE_BUCKET=linuxkit-gcp-test-bucket
+      - PROFILE=localhost
+    secrets:
+      - gcp-key.json
+      - builder-ssh
+  db:
+    image: 'datakit/db'
+    command: '-v --listen-9p tcp://0.0.0.0:5640 --git /data'
+    volumes:
+      - '/data'
+  bridge:
+    restart: always
+    image: 'datakit/local-bridge'
+    command: '--metadata-store tcp:db:5640 -v linuxkit/linuxkit:/linuxkit-src'
+    volumes:
+      # The location of the local repository to monitor.
+      - './local/linuxkit:/linuxkit-src'
+
+secrets:
+  gcp-key.json:
+    file: ./local/gcp-key.json
+  builder-ssh:
+    file: ./local/builder-ssh/id_rsa
