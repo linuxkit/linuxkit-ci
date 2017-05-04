@@ -23,10 +23,12 @@ services:
       # SSH directory for accessing GCP instances
       - './local/builder-ssh:/root/.ssh/builder-ssh'
     environment:
-      - CLOUDSDK_CORE_PROJECT=moby-datakit-ci
-      - CLOUDSDK_COMPUTE_ZONE=europe-west1-b
+      # These will be imported from your local environment
+      - CLOUDSDK_CORE_PROJECT
+      - CLOUDSDK_COMPUTE_ZONE
+      - CLOUDSDK_IMAGE_BUCKET
+      # Use Docker Secrets for GCP keys
       - CLOUDSDK_COMPUTE_KEYS=/run/secrets/gcp-key.json
-      - CLOUDSDK_IMAGE_BUCKET=linuxkit-gcp-test-bucket
       - PROFILE=localhost
     secrets:
       - gcp-key.json
