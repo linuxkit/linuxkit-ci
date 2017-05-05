@@ -189,11 +189,14 @@ module Builder = struct
          tar#status >|= Datakit_ci.Process.check_status tar_cmd
       )
     >>= fun () ->
-    let remote file = Fmt.strf "root@%s:/tmp/build/%s" ip file in
-    let cmd = "scp" ::
-              "-i" :: builder_ssh_key ::
-              "-o" :: "StrictHostKeyChecking=no" ::
-              (List.map remote outputs @ ["."]) in
+    let cmd = [
+      "scp";
+      "-r";
+      "-i"; builder_ssh_key;
+      "-o"; "StrictHostKeyChecking=no";
+      Fmt.strf "root@%s:/tmp/build/artifacts" ip;
+      "."
+    ] in
     Live_log.log log "Fetching results";
     let output = Live_log.write log in
     Lwt.catch
@@ -254,9 +257,10 @@ module Builder = struct
          | Some msg -> Lwt.fail_with msg
       )
     >>= fun () ->
+    let artifacts_dir = src_dir / "artifacts" in
     let results = ref String.Map.empty in
     outputs |> Lwt_list.iter_s (fun output_name ->
-        Disk_cache.add t.results (src_dir / output_name) >|= fun hash ->
+        Disk_cache.add t.results (artifacts_dir / output_name) >|= fun hash ->
         Live_log.log log "Saved build result %s (%a)" output_name Hash.pp hash;
         results := String.Map.add output_name hash !results
       )
