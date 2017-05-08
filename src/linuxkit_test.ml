@@ -2,6 +2,8 @@ open Datakit_ci
 open! Astring
 open Lwt.Infix
 
+let timeout = 10. *. 60.
+
 let with_child_switch switch fn =
   let child = Lwt_switch.create () in
   Lwt_switch.add_hook (Some switch) (fun () -> Lwt_switch.turn_off child);
@@ -39,7 +41,7 @@ module Builder = struct
     let image_path = Disk_cache.get t.build_cache image in
     let label = Fmt.strf "Test GCP image %a" Hash.pp image in
     Monitored_pool.use ~log ~label t.google_pool job_id @@ fun () ->
-    with_child_switch switch @@ fun switch ->   (* Ensure VM is killed *)
+    Utils.with_timeout ~switch timeout @@ fun switch ->
     Gcp.allocate_vm_name ~log ~switch t.vms >>= fun vm ->
     with_child_switch switch @@ fun switch ->   (* Allow stopping the test early *)
     let output x =
