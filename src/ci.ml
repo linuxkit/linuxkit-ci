@@ -52,9 +52,13 @@ module Builder = struct
 
   (* How to test the various images we produce. *)
   let test_images results =
-    let get x = String.Map.get x results in
+    let get x =
+      match String.Map.find x results with
+      | Some x -> Term.return x
+      | None -> Term.fail "Output %s not found" x
+    in
     Term.wait_for_all [
-      "GCP", get "test.img.tar.gz" |> Linuxkit_test.gcp tester;
+      "GCP", get "test.img.tar.gz" >>= Linuxkit_test.gcp tester;
     ]
     >|= fun () -> "All tests passed"
 

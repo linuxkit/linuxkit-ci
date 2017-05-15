@@ -2,6 +2,9 @@ open Datakit_ci
 open Lwt.Infix
 open! Astring
 
+let src = Logs.Src.create "linuxkit-build" ~doc:"LinuxKit CI builder"
+module Log = (val Logs.src_log src : Logs.LOG)
+
 let builder_ssh_key = "/run/secrets/builder-ssh"
 
 type error_pattern = {
@@ -9,6 +12,10 @@ type error_pattern = {
   re : Str.regexp;
   group : int;
 }
+
+let artifacts_path =
+  let open! Datakit_path.Infix in
+  Cache.Path.value / "artifacts"
 
 (* Each line is checked against each pattern in this list. The first match is used as the score
    for the line. The matched group becomes the new best error, unless it's score is less than
@@ -130,6 +137,46 @@ end = struct
     | Some (_, msg) -> Some msg
 end
 
+let rec copy_to_transaction ~trans ~dir srcdir =
+  let ( / ) = Datakit_path.Infix.( / ) in
+  Utils.ls srcdir
+  >>= Lwt_list.iter_s (function
+      | "." | ".." -> Lwt.return ()
+      | item ->
+        let dk_path = dir / item in
+        let path = Filename.concat srcdir item in
+        Lwt_unix.lstat path >>= fun info ->
+        match info.Lwt_unix.st_kind with
+        | Lwt_unix.S_REG ->
+          Log.debug (fun f -> f "Copying %S to results..." item);
+          Lwt_io.with_file ~mode:Lwt_io.input path (fun ch -> Lwt_io.read ch) >>= fun data ->
+          DK.Transaction.create_file trans dk_path (Cstruct.of_string data) >>*= Lwt.return
+        | Lwt_unix.S_DIR ->
+          DK.Transaction.create_dir trans dk_path >>*= fun () ->
+          let open! Datakit_path.Infix in
+          copy_to_transaction ~trans ~dir:dk_path (Filename.concat srcdir item)
+        | _ ->
+          Log.warn (fun f -> f "Ignoring non-file entry %S" item);
+          Lwt.return ()
+    )
+
+let is_directory path =
+  match Sys.is_directory path with
+  | x -> x
+  | exception _ -> false
+
+let storing_logs ~log ~tmpdir ~trans fn () =
+  Lwt.finalize fn
+    (fun () ->
+       let results_dir = tmpdir / "_results" in
+       if is_directory results_dir then
+         copy_to_transaction ~trans ~dir:Cache.Path.value results_dir
+       else (
+         Live_log.log log "Results directory %S not found, so not saving" results_dir;
+         Lwt.return_unit
+       )
+    )
+
 module Builder = struct
   module Key = struct
     type t = {
@@ -165,7 +212,8 @@ module Builder = struct
     Live_log.log log "Created new VM %a" Gcp.pp_vm vm;
     f ip
 
-  let build_in_vm ~switch ~log ~ip ~src ~output ~best_error =
+  let build_in_vm ~switch ~log ~ip ~tmpdir ~output ~best_error =
+    let src = tmpdir / "src" in
     let to_ssh, from_tar = Unix.pipe () in
     let tar_cmd = ("", [| "git"; "archive"; "--format=tar"; "HEAD" |]) in
     Lwt_mutex.with_lock Datakit_ci.Utils.chdir_lock (fun () ->
@@ -181,30 +229,52 @@ module Builder = struct
          (* StrictHostKeyChecking=no isn't ideal, but this appears to be what "gcloud ssh" does anyway. *)
          let cmd = ("", [| "ssh"; "-i"; builder_ssh_key;
                            "-o"; "StrictHostKeyChecking=no"; "root@" ^ ip; "/usr/local/bin/test.sh" |]) in
-         Datakit_ci.Process.run ~switch ~log ~stdin ~output cmd >|= fun () ->
-         Error_finder.reset best_error
+         Lwt.catch
+           (fun () ->
+              Datakit_ci.Process.run ~switch ~log ~stdin ~output cmd >|= fun () ->
+              Error_finder.reset best_error;
+              Ok ()
+           )
+           (fun ex -> Lwt.return (Error ex))
       )
       (fun () ->
          tar#terminate;
          tar#status >|= Datakit_ci.Process.check_status tar_cmd
       )
-    >>= fun () ->
+    >>= fun status ->
+    let targets =
+      Fmt.strf "root@%s:/tmp/build/test/_results" ip ::
+      (
+        match status with
+        | Ok () -> [Fmt.strf "root@%s:/tmp/build/artifacts" ip]
+        | Error _ -> []
+      )
+    in
     let cmd = [
       "scp";
       "-r";
       "-i"; builder_ssh_key;
-      "-o"; "StrictHostKeyChecking=no";
-      Fmt.strf "root@%s:/tmp/build/artifacts" ip;
+      "-o"; "StrictHostKeyChecking=no"
+    ] @ targets @ [
       "."
     ] in
     Live_log.log log "Fetching results";
     let output = Live_log.write log in
     Lwt.catch
-      (fun () -> Process.run ~cwd:src ~log ~switch ~output ("", Array.of_list cmd))
+      (fun () ->
+         Process.run ~cwd:tmpdir ~log ~switch ~output ("", Array.of_list cmd) >>= fun () ->
+         match status with
+         | Ok () -> Lwt.return ()
+         | Error ex -> Lwt.fail ex
+      )
       (fun ex ->
          Live_log.log log "Error fetching results: %a" Fmt.exn ex;
-         Utils.failf "Failed to fetch %a"
-           Fmt.(list ~sep:(const string ",") string) outputs
+         match status with
+         | Ok () ->
+           Utils.failf "Failed to fetch %a"
+             Fmt.(list ~sep:(const string ",") string) outputs
+         | Error ex ->
+           Lwt.fail ex
       )
     
   let generate t ~switch ~log trans job_id key =
@@ -231,11 +301,11 @@ module Builder = struct
       Live_log.write log x
     in
     Lwt.catch
-      (fun () ->
+      (storing_logs ~log ~tmpdir ~trans (fun () ->
          Utils.with_timeout ~switch build_timeout @@ fun switch ->
          match target with
          | `PR _ ->
-           with_vm t.vms ~switch ~log (fun ip -> build_in_vm ~switch ~log ~ip ~src:src_dir ~output ~best_error)
+           with_vm t.vms ~switch ~log (fun ip -> build_in_vm ~switch ~log ~ip ~tmpdir ~output ~best_error)
          | `Ref _ ->
            let make_target, tag_name = make_target target in
            let extra_args =
@@ -248,34 +318,53 @@ module Builder = struct
            with_child_switch switch (fun switch ->
                Gcp.allocate_vm_name ~log ~switch t.vms >>= fun test_vm ->
                let cmd = "make" :: make_target :: ("CLOUDSDK_IMAGE_NAME=" ^ test_vm.Gcp.name) :: extra_args in
-               Process.run ~cwd:src_dir ~log ~switch ~output ("", Array.of_list cmd)
+               Lwt.finalize
+                 (fun () -> Process.run ~cwd:src_dir ~log ~switch ~output ("", Array.of_list cmd))
+                 (fun () ->
+                    if is_directory (src_dir / "artifacts") then
+                      Unix.rename (src_dir / "artifacts") (tmpdir / "artifacts");
+                    if is_directory (src_dir / "test/_results") then
+                      Unix.rename (src_dir / "test/_results") (tmpdir / "_results");
+                    Lwt.return ()
+                 )
              )
-      )
+      ))
       (fun ex ->
          match Error_finder.best best_error with
          | None -> Lwt.fail ex
          | Some msg -> Lwt.fail_with msg
       )
     >>= fun () ->
-    let artifacts_dir = src_dir / "artifacts" in
+    let artifacts_dir = tmpdir / "artifacts" in
     let results = ref String.Map.empty in
     outputs |> Lwt_list.iter_s (fun output_name ->
-        Disk_cache.add t.results (artifacts_dir / output_name) >|= fun hash ->
-        Live_log.log log "Saved build result %s (%a)" output_name Hash.pp hash;
-        results := String.Map.add output_name hash !results
+        let path = artifacts_dir / output_name in
+        if Sys.file_exists path then (
+          Disk_cache.add t.results (artifacts_dir / output_name) >|= fun hash ->
+          Live_log.log log "Saved build result %s (%a)" output_name Hash.pp hash;
+          results := String.Map.add output_name hash !results
+        ) else (
+          Live_log.log log "Artifact %S does not exist, so not saving" output_name;
+          Lwt.return ()
+        )
       )
     >>= fun () ->
     let results = !results in
     let data = Cstruct.of_string (Yojson.Basic.to_string (Results.to_json results)) in
-    DK.Transaction.create_file trans Cache.Path.value data >>*= fun () ->
+    DK.Transaction.create_file trans artifacts_path data >>*= fun () ->
     Lwt.return (Ok results)
 
-  let load t tree _key =
-    DK.Tree.read_file tree Cache.Path.value >>*= fun data ->
+  let load_json t data =
     let json = Yojson.Basic.from_string (Cstruct.to_string data) in
     let results = Results.of_json json in
     String.Map.iter (fun _k v -> Disk_cache.validate t.results v) results;
     Lwt.return results
+
+  let load t tree _key =
+    DK.Tree.read_file tree artifacts_path >>= function
+    | Ok data -> load_json t data
+    | Error `Not_file -> DK.Tree.read_file tree Cache.Path.value >>*= load_json t
+    | Error e -> Utils.failf "Unexpected DB error: %a" DK.pp_error e
 
   let branch _t { Key.src; target} =
     let src_hash = Git.hash src in
