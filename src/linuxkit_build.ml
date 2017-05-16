@@ -177,6 +177,15 @@ let storing_logs ~log ~tmpdir ~trans fn () =
        )
     )
 
+(* Copy file [src] to [dst]. [dst] is in a directory we created, but [dst]
+   itself might be a symlink, so check for that first. *)
+let safe_copy ~log src dst =
+  match Unix.lstat dst with
+  | _ -> Utils.failf "%S already exists!" dst
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    let cp_cmd = [| "cp"; "-p"; "--"; src; dst |] in
+    Process.run ~log ~output:(Live_log.write log) ("", cp_cmd)
+
 module Builder = struct
   module Key = struct
     type t = {
@@ -212,12 +221,11 @@ module Builder = struct
     Live_log.log log "Created new VM %a" Gcp.pp_vm vm;
     f ip
 
-  let build_in_vm ~switch ~log ~ip ~tmpdir ~output ~best_error =
-    let src = tmpdir / "src" in
+  let build_in_vm ~switch ~log ~ip ~tmpdir ~src_dir ~output ~best_error =
     let to_ssh, from_tar = Unix.pipe () in
-    let tar_cmd = ("", [| "git"; "archive"; "--format=tar"; "HEAD" |]) in
+    let tar_cmd = ("", [| "tar"; "cf"; "-"; "." |]) in
     Lwt_mutex.with_lock Datakit_ci.Utils.chdir_lock (fun () ->
-        Sys.chdir src;
+        Sys.chdir src_dir;
         let child = Lwt_process.open_process_none ~stdout:(`FD_move from_tar) tar_cmd in
         Sys.chdir "/";   (* Just to detect problems with this scheme early *)
         Lwt.return child
@@ -286,26 +294,20 @@ module Builder = struct
       | `Ref _ -> t.pool
     in
     Monitored_pool.use ~log ~label pool job_id @@ fun () ->
-    Utils.with_tmpdir ~prefix:"linuxkit-" ~mode:0o700 @@ fun tmpdir ->
-    (* LinuxKit needs the .git directory, so we have to copy *)
-    Git.with_checkout ~log ~job_id src (fun src_dir ->
-        let output = Live_log.write log in
-        let copy = tmpdir / "src" in
-        Process.run ~log ~output ("", [| "git"; "clone"; src_dir; copy |]) >>= fun () ->
-        Lwt.return copy
-      )
-    >>= fun src_dir ->
+    Git.with_clone ~log ~job_id src @@ fun src_dir ->
+    safe_copy ~log "/gcloud/ci-setup.sh" (src_dir / "ci-setup.sh") >>= fun () ->
     let best_error = Error_finder.create () in
     let output x =
       Error_finder.feed best_error x;
       Live_log.write log x
     in
+    Utils.with_tmpdir ~prefix:"linuxkit-" ~mode:0o700 @@ fun tmpdir ->
     Lwt.catch
       (storing_logs ~log ~tmpdir ~trans (fun () ->
          Utils.with_timeout ~switch build_timeout @@ fun switch ->
          match target with
          | `PR _ ->
-           with_vm t.vms ~switch ~log (fun ip -> build_in_vm ~switch ~log ~ip ~tmpdir ~output ~best_error)
+           with_vm t.vms ~switch ~log (fun ip -> build_in_vm ~switch ~log ~ip ~tmpdir ~src_dir ~output ~best_error)
          | `Ref _ ->
            let make_target, tag_name = make_target target in
            let extra_args =
