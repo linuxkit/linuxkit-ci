@@ -81,6 +81,7 @@ let can_build =
   | `Production ->
     any [
       username "admin";
+      username "github:rneugeba";
       github_org "linuxkit";
     ]
 
