@@ -268,9 +268,9 @@ module Builder = struct
     ] in
     Live_log.log log "Fetching results";
     let output = Live_log.write log in
-    Lwt.catch
+    Lwt.try_bind
+      (fun () -> Process.run ~cwd:tmpdir ~log ~switch ~output ("", Array.of_list cmd))
       (fun () ->
-         Process.run ~cwd:tmpdir ~log ~switch ~output ("", Array.of_list cmd) >>= fun () ->
          match status with
          | Ok () -> Lwt.return ()
          | Error ex -> Lwt.fail ex
