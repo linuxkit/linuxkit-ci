@@ -1,12 +1,10 @@
-OCAMLBUILD_FLAGS=-use-ocamlfind
-
 .PHONY: all docker clean
 
 all:
-	ocamlbuild ${OCAMLBUILD_FLAGS} ci.native
+	jbuilder build --dev src/ci.exe
 
 docker:
 	docker build -t linuxkitci/ci .
 
 clean:
-	ocamlbuild -clean
+	jbuilder clean
