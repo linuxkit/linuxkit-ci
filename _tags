@@ -1,3 +1,0 @@
-true: warn(A-4), strict_sequence, safe_string, annot, bin_annot
-true: package(datakit-ci astring cmdliner hex)
-<src>: include

@@ -14,7 +14,7 @@ type error_pattern = {
 }
 
 let artifacts_path =
-  let open! Datakit_path.Infix in
+  let open! Datakit_client.Path.Infix in
   Cache.Path.value / "artifacts"
 
 (* Each line is checked against each pattern in this list. The first match is used as the score
@@ -138,7 +138,7 @@ end = struct
 end
 
 let rec copy_to_transaction ~trans ~dir srcdir =
-  let ( / ) = Datakit_path.Infix.( / ) in
+  let ( / ) = Datakit_client.Path.Infix.( / ) in
   Utils.ls srcdir
   >>= Lwt_list.iter_s (function
       | "." | ".." -> Lwt.return ()
@@ -153,7 +153,7 @@ let rec copy_to_transaction ~trans ~dir srcdir =
           DK.Transaction.create_file trans dk_path (Cstruct.of_string data) >>*= Lwt.return
         | Lwt_unix.S_DIR ->
           DK.Transaction.create_dir trans dk_path >>*= fun () ->
-          let open! Datakit_path.Infix in
+          let open! Datakit_client.Path.Infix in
           copy_to_transaction ~trans ~dir:dk_path (Filename.concat srcdir item)
         | _ ->
           Log.warn (fun f -> f "Ignoring non-file entry %S" item);
@@ -284,7 +284,7 @@ module Builder = struct
          | Error ex ->
            Lwt.fail ex
       )
-    
+
   let generate t ~switch ~log trans job_id key =
     let { Key.src; target } = key in
     let label = Fmt.strf "Build LinuxKit (%a)" pp_short_hash src in
