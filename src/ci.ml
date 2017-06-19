@@ -34,13 +34,32 @@ let src_repo =
   in
   Git.v ~logs ~remote "/repos/linuxkit"
 
+let ci_repo =
+  let remote =
+    match profile with
+    | `Production -> "https://github.com/linuxkit/linuxkit-ci.git"
+    | `Localhost -> "/fake-remote/linuxkit-ci"       (* Pull from our local "remote" *)
+  in
+  Git.v ~logs ~remote "/repos/linuxkit-ci"
+
 (* Cache of built images. Can be deleted without too much trouble, but e.g. if you try to
    re-run the tests after deleting the image it will fail and you'll have to rebuild the
    image first. *)
 let build_cache = Disk_cache.make ~path:"/build-cache"
 
+let docker_pool = Monitored_pool.create "Docker" 4
+
+let minute = 60.
+
+let ci_dockerfile =
+  let timeout = 10. *. minute in
+  Docker.create ~logs ~pool:docker_pool ~timeout ~label:"CI.Dockerfile" "Dockerfile"
+
 module Builder = struct
   open Term.Infix
+
+  let check_builds term =
+    term >|= fun (_:Docker.Image.t) -> "Build succeeded"
 
   let builder = Linuxkit_build.make ~logs ~pool ~google_pool ~vms ~build_cache
   let tester = Linuxkit_test.make ~logs ~google_pool ~vms ~build_cache
@@ -67,9 +86,15 @@ module Builder = struct
     "linuxkit-ci", build src_repo ~builder ~target >>= test_images
   ]
 
+  (* Test that LinuxKitCI itself builds. *)
+  let ci_status target = [
+    "build", Git.fetch_head ci_repo target >|= Docker.build ci_dockerfile >>= check_builds;
+  ]
+
   (* For the "linuxkit/linuxkit" GitHub repository, use [status]. *)
   let tests = [
-    Config.project ~id:"linuxkit/linuxkit" status
+    Config.project ~id:"linuxkit/linuxkit" status;
+    Config.project ~id:"linuxkit/linuxkit-ci" ci_status ~dashboards:[];
   ]
 end
 

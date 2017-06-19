@@ -4,7 +4,7 @@ services:
   ci:
     image: 'linuxkitci/ci'
     # The canary flag can be used to limit which branches you want to test:
-    command: '-v --web-ui http://localhost:8080/ --metadata-store tcp:db:5640 --canary=linuxkit/linuxkit/heads/master'
+    command: '-v --web-ui http://localhost:8080/ --metadata-store tcp:db:5640 --canary=linuxkit/linuxkit/heads/master --canary=linuxkit/linuxkit-ci/heads/master'
     ports:
       - '8080:8080'
     volumes:
@@ -41,10 +41,11 @@ services:
   bridge:
     restart: always
     image: 'datakit/local-bridge'
-    command: '--metadata-store tcp:db:5640 -v linuxkit/linuxkit:/linuxkit-src'
+    command: '--metadata-store tcp:db:5640 -v linuxkit/linuxkit:/linuxkit-src linuxkit/linuxkit-ci:/linuxkit-ci-src'
     volumes:
-      # The location of the local repository to monitor.
+      # The location of the local repositories to monitor.
       - './local/linuxkit:/linuxkit-src'
+      - './local/linuxkit-ci:/linuxkit-ci-src'
 
 secrets:
   gcp-key.json:

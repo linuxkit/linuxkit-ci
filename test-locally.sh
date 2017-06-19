@@ -4,6 +4,7 @@ set -eux
 [ -d local ] || mkdir local
 [ -d local/builder-ssh ] || mkdir local/builder-ssh
 [ -d local/linuxkit ] || git -C local clone https://github.com/linuxkit/linuxkit.git
+[ -d local/linuxkit-ci ] || git -C local clone https://github.com/linuxkit/linuxkit-ci.git
 make docker
 docker-compose build
 docker-compose up
