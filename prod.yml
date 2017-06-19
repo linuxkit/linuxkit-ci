@@ -2,7 +2,7 @@ version: '3.1'
 
 services:
   bridge:
-    command: '--listen-prometheus=9090 --datakit tcp://db:5640 --no-listen -v -c "*:r,status[ci/datakit]:x,webhook:rw" --webhook http://hooks.datakit.ci:83 --log-destination timestamp'
+    command: '--listen-prometheus=9090 --datakit tcp://db:5640 -v -c "*:r,status[ci/datakit]:x,webhook:rw" --webhook http://hooks.datakit.ci:83 --log-destination timestamp'
     image: 'datakit/github-bridge'
     ports:
       - '83:83'
