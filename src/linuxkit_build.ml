@@ -31,7 +31,7 @@ let re_errors = [
 
 let ( / ) = Filename.concat
 
-let build_timeout = 60. *. 60.
+let build_timeout = 2. *. 60. *. 60.
 
 let ( >>*= ) x f =
   x >>= function
