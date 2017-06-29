@@ -5,6 +5,13 @@ open! Astring
 let src = Logs.Src.create "linuxkit-build" ~doc:"LinuxKit CI builder"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let always_build_in_vm = false
+
+let use_vm_for target =
+  always_build_in_vm || match target with
+  | `PR _ -> true
+  | `Ref _ -> false
+
 let builder_ssh_key = "/run/secrets/builder-ssh"
 
 type error_pattern = {
@@ -29,7 +36,7 @@ let re_errors = [
   { score = 1; re = Str.regexp "Makefile:[0-9]+:? \\(.*\\)"; group = 2};
 ]
 
-let ( / ) = Filename.concat
+let ( /+ ) = Filename.concat
 
 let build_timeout = 2. *. 60. *. 60.
 
@@ -168,7 +175,7 @@ let is_directory path =
 let storing_logs ~log ~tmpdir ~trans fn () =
   Lwt.finalize fn
     (fun () ->
-       let results_dir = tmpdir / "_results" in
+       let results_dir = tmpdir /+ "_results" in
        if is_directory results_dir then
          copy_to_transaction ~trans ~dir:Cache.Path.value results_dir
        else (
@@ -295,20 +302,34 @@ module Builder = struct
     in
     Monitored_pool.use ~log ~label pool job_id @@ fun () ->
     Git.with_clone ~log ~job_id src @@ fun src_dir ->
-    safe_copy ~log "/gcloud/ci-setup.sh" (src_dir / "ci-setup.sh") >>= fun () ->
+    safe_copy ~log "/gcloud/ci-setup.sh" (src_dir /+ "ci-setup.sh") >>= fun () ->
     let best_error = Error_finder.create () in
+    let t0 = Unix.gettimeofday () in
+    let need_newline = ref true in
     let output x =
       Error_finder.feed best_error x;
-      Live_log.write log x
+      let ends_with_nl = String.is_suffix ~affix:"\n" x in
+      let x = if ends_with_nl then String.with_range x ~len:(String.length x - 1) else x in
+      let lines = String.cuts ~sep:"\n" x in
+      let time = truncate (Unix.gettimeofday () -. t0) in
+      let min = time / 60 in
+      let sec = time mod 60 in
+      lines |> List.fold_left (fun need_newline line ->
+          if need_newline then Live_log.printf log "\n[+% 3d%,m %02d%,s] %s" min sec line
+          else Live_log.printf log "%s" line;
+          true
+        ) !need_newline
+      |> ignore;
+      need_newline := ends_with_nl
     in
     Utils.with_tmpdir ~prefix:"linuxkit-" ~mode:0o700 @@ fun tmpdir ->
     Lwt.catch
       (storing_logs ~log ~tmpdir ~trans (fun () ->
+         Live_log.log log "Building with timeout of %.0f minutes" (build_timeout /. 60.);
          Utils.with_timeout ~switch build_timeout @@ fun switch ->
-         match target with
-         | `PR _ ->
+         if use_vm_for target then (
            with_vm t.vms ~switch ~log (fun ip -> build_in_vm ~switch ~log ~ip ~tmpdir ~src_dir ~output ~best_error)
-         | `Ref _ ->
+         ) else (
            let make_target, tag_name = make_target target in
            let extra_args =
              match tag_name with
@@ -323,13 +344,14 @@ module Builder = struct
                Lwt.finalize
                  (fun () -> Process.run ~cwd:src_dir ~log ~switch ~output ("", Array.of_list cmd))
                  (fun () ->
-                    if is_directory (src_dir / "artifacts") then
-                      Unix.rename (src_dir / "artifacts") (tmpdir / "artifacts");
-                    if is_directory (src_dir / "test/_results") then
-                      Unix.rename (src_dir / "test/_results") (tmpdir / "_results");
+                    if is_directory (src_dir /+ "artifacts") then
+                      Unix.rename (src_dir /+ "artifacts") (tmpdir /+ "artifacts");
+                    if is_directory (src_dir /+ "test/_results") then
+                      Unix.rename (src_dir /+ "test/_results") (tmpdir /+ "_results");
                     Lwt.return ()
                  )
              )
+         )
       ))
       (fun ex ->
          match Error_finder.best best_error with
@@ -337,12 +359,12 @@ module Builder = struct
          | Some msg -> Lwt.fail_with msg
       )
     >>= fun () ->
-    let artifacts_dir = tmpdir / "artifacts" in
+    let artifacts_dir = tmpdir /+ "artifacts" in
     let results = ref String.Map.empty in
     outputs |> Lwt_list.iter_s (fun output_name ->
-        let path = artifacts_dir / output_name in
+        let path = artifacts_dir /+ output_name in
         if Sys.file_exists path then (
-          Disk_cache.add t.results (artifacts_dir / output_name) >|= fun hash ->
+          Disk_cache.add t.results (artifacts_dir /+ output_name) >|= fun hash ->
           Live_log.log log "Saved build result %s (%a)" output_name Hash.pp hash;
           results := String.Map.add output_name hash !results
         ) else (
