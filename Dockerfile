@@ -23,6 +23,7 @@ RUN apk update && apk add \
 	openssh-client \
 	make \
 	curl \
+	expect \
 	qemu-img \
 	qemu-system-x86_64
 
