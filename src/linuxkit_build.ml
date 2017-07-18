@@ -243,6 +243,7 @@ module Builder = struct
          let stdin = `FD_move to_ssh in
          (* StrictHostKeyChecking=no isn't ideal, but this appears to be what "gcloud ssh" does anyway. *)
          let cmd = ("", [| "ssh"; "-i"; builder_ssh_key;
+                           "-o"; "UserKnownHostsFile=/dev/null";
                            "-o"; "StrictHostKeyChecking=no"; "root@" ^ ip; "/usr/local/bin/test.sh" |]) in
          Lwt.catch
            (fun () ->

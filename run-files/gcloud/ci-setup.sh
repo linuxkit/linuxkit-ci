@@ -2,3 +2,4 @@
 set -eux
 mkdir -p /tmp/build/test/_results /tmp/build/artifacts
 sysctl vm.overcommit_memory=1
+rm /tmp/build/ci-setup.sh
