@@ -8,6 +8,8 @@ RUN sudo chown -R opam /src
 RUN opam config exec make
 
 FROM alpine:3.5
+ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
+
 RUN apk update && apk add \
 	libev \
 	docker \
