@@ -109,6 +109,7 @@ let can_build =
       username "github:samoht";
       username "github:rn";
       username "github:ijc";
+      username "github:deitch";
       github_org "linuxkit";
     ]
 
