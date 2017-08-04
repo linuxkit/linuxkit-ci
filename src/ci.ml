@@ -11,7 +11,7 @@ let profile =
   | exception Not_found -> Utils.failf "$PROFILE not set"
 
 (* Used for branch and tag builds. Pool can be enlarged easily if needed. *)
-let pool = Monitored_pool.create "LinuxKit builds" 8
+let pool = Monitored_pool.create "LinuxKit builds on fixed-build-node" 8
 
 (* Used for building PRs, testing GCP images and running LTP tests. *)
 let google_pool = Monitored_pool.create "LinuxKit builds on GCP" 8
