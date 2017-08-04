@@ -12,8 +12,6 @@ let use_vm_for target =
   | `PR _ -> true
   | `Ref _ -> false
 
-let builder_ssh_key = "/run/secrets/builder-ssh"
-
 type error_pattern = {
   score : int;
   re : Str.regexp;
@@ -242,7 +240,7 @@ module Builder = struct
       (fun () ->
          let stdin = `FD_move to_ssh in
          (* StrictHostKeyChecking=no isn't ideal, but this appears to be what "gcloud ssh" does anyway. *)
-         let cmd = ("", [| "ssh"; "-i"; builder_ssh_key;
+         let cmd = ("", [| "ssh"; "-i"; Gcp.builder_ssh_key;
                            "-o"; "UserKnownHostsFile=/dev/null";
                            "-o"; "StrictHostKeyChecking=no"; "root@" ^ ip; "/usr/local/bin/test.sh" |]) in
          Lwt.catch
@@ -269,7 +267,7 @@ module Builder = struct
     let cmd = [
       "scp";
       "-r";
-      "-i"; builder_ssh_key;
+      "-i"; Gcp.builder_ssh_key;
       "-o"; "StrictHostKeyChecking=no"
     ] @ targets @ [
       "."
