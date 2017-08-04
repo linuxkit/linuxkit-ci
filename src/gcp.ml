@@ -5,6 +5,8 @@ open Datakit_ci
 let src = Logs.Src.create "gcp" ~doc:"Google Cloud Platform VMs"
 module Log = (val Logs.src_log src : Logs.LOG)
 
+let builder_ssh_key = "/run/secrets/builder-ssh"
+
 let vm_start_timeout = 15. *. 60.
 
 type vm = {
@@ -86,6 +88,25 @@ let allocate_vm_name ~log ~switch t =
   Lwt_switch.add_hook (Some switch) (fun () -> destroy_vm t ~log ~output vm);
   vm
 
+let wait_for_ssh ~switch ~log ip =
+  Live_log.log log "Waiting for SSH service to start...";
+  let cmd = ("", [| "ssh"; "-i"; builder_ssh_key;
+                    "-o"; "UserKnownHostsFile=/dev/null";
+                    "-o"; "StrictHostKeyChecking=no"; "root@" ^ ip; "uname"; "-a" |]) in
+  let output = Live_log.write log in
+  let rec loop ~delay = function
+    | 0 -> Lwt.fail_with "SSH service failed to start"
+    | i ->
+      Lwt.catch
+        (fun () -> Datakit_ci.Process.run ~switch ~log ~output cmd)
+        (fun ex ->
+           Live_log.log log "SSH not ready (%a)" Fmt.exn ex;
+           Lwt_unix.sleep delay >>= fun () ->
+           loop ~delay:(delay *. 2.0) (i - 1)
+        )
+  in
+  loop ~delay:2.0 4
+
 let create_vm ~log ~switch t =
   allocate_vm_name ~log ~switch t >>= fun vm ->
   let ip = Buffer.create 32 in
@@ -97,6 +118,7 @@ let create_vm ~log ~switch t =
   >>= fun () ->
   let ip = String.trim (Buffer.contents ip) in
   vm.vm_state <- `Created;
+  wait_for_ssh ~switch ~log ip >>= fun () ->
   Lwt.return (vm, ip)
 
 let cleanup_leftovers t = function

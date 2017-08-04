@@ -1,5 +1,8 @@
 open Datakit_ci
 
+val builder_ssh_key : string
+(** Path of the SSH private key file. *)
+
 type vm = {
   name : string;
   mutable vm_state : [`Unknown | `Created | `Destroyed];
