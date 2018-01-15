@@ -17,6 +17,7 @@ logging.info("Using source disk image %s", source_disk_image)
 config = {
         'name': name,
         'machineType': 'zones/europe-west1-b/machineTypes/custom-2-5120',
+        'minCpuPlatform': 'Intel Haswell',
         'disks': [
             {
                 'boot': True,
