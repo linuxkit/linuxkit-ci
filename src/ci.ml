@@ -107,6 +107,8 @@ let can_build =
     any [
       username "admin";
       username "github:samoht";
+      username "github:djs55";
+      username "github:justincormack";
       username "github:rn";
       username "github:ijc";
       username "github:deitch";
