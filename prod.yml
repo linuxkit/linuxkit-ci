@@ -53,12 +53,6 @@ volumes:
   datakit-ssh:
     external:
       name: self-ci_datakit-ssh
-  talex5-ci-key:
-    external:
-      name: private_talex5-ci-key
-  fixed-builder-ssh:
-    external:
-      name: private_gce-key
   docker-hub-secrets:
     external:
       name: private_docker-hub-secrets

@@ -23,8 +23,8 @@ To use Google Compute for testing:
 
 ### Deploying to production
 
-You need access to the `editions/datakit-ci` swarm, which is controlled by the `editions/datakitciadmins`
-team list currently.
+You need access to the `moby-datakit-ci` GCP project.
+The CI runs on the machine named `ci-manager`.
 
 If you change `prod.yml`, run `./deploy-prod.sh` to update the deployed services.
 
