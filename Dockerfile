@@ -31,6 +31,7 @@ RUN apk update && apk add \
 
 RUN pip install google-api-python-client
 RUN pip install google-cloud-storage
+RUN pip install oauth2client
 
 RUN wget https://github.com/docker/notary/releases/download/v0.4.3/notary-Linux-amd64 -O /usr/local/bin/notary
 RUN echo '06cd02c4c2e7a3b1ad9899b03b3d4dde5392d964c675247d32f604a24661f839 */usr/local/bin/notary' | sha256sum -w -c -
